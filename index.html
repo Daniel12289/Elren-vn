@@ -1,0 +1,144 @@
+<!DOCTYPE html><html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firebase WhatsApp Call App</title>
+<style>
+body { margin:0; background:#000; color:white; font-family:Arial; }
+video { position:absolute; width:100%; height:100%; object-fit:cover; }
+#localVideo { width:120px; height:160px; top:20px; left:20px; position:absolute; border-radius:12px; border:2px solid white; }
+#topBar { position:absolute; top:20px; width:100%; text-align:center; }
+#controls { position:absolute; bottom:40px; width:100%; display:flex; justify-content:center; gap:20px; }
+.btn { width:60px; height:60px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:20px; }
+.gray { background:#333; }
+.red { background:red; }#login { position:absolute; top:0; left:0; width:100%; height:100%; background:#111; display:flex; flex-direction:column; justify-content:center; align-items:center; } input { padding:10px; margin:5px; border-radius:8px; border:none; } button { padding:10px; border:none; border-radius:8px; } </style>
+
+</head>
+<body><div id="login">
+  <h2>Login</h2>
+  <input id="username" placeholder="Enter username" />
+  <input id="target" placeholder="Call user" />
+  <button onclick="login()">Start</button>
+</div><video id="remoteVideo" autoplay></video> <video id="localVideo" autoplay muted></video>
+
+<div id="topBar">
+  <div id="status">Idle</div>
+</div><div id="controls">
+  <div class="btn gray" onclick="callUser()">📞</div>
+  <div class="btn gray" onclick="toggleMute()">🎤</div>
+  <div class="btn red" onclick="endCall()">❌</div>
+</div><script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script><script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js"></script><script src="https://cdn.jsdelivr.net/npm/simple-peer@9/simplepeer.min.js"></script><script>
+// 🔥 YOUR FIREBASE CONFIG
+const firebaseConfig = {
+  apiKey: "AIzaSyDWAYxAbwYjovA65HY31bEBeJQXRkgrH5U",
+  authDomain: "my-backend-5201d.firebaseapp.com",
+  databaseURL: "https://my-backend-5201d-default-rtdb.firebaseio.com",
+  projectId: "my-backend-5201d",
+  storageBucket: "my-backend-5201d.firebasestorage.app",
+  messagingSenderId: "508325836872",
+  appId: "1:508325836872:web:2cc861f5b259de15e9c07d"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let peer;
+let localStream;
+let currentUser;
+let targetUser;
+let micOn = true;
+
+async function init() {
+  localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+  document.getElementById('localVideo').srcObject = localStream;
+}
+init();
+
+function login() {
+  currentUser = document.getElementById('username').value;
+  targetUser = document.getElementById('target').value;
+
+  if (!currentUser) return alert("Enter username");
+
+  db.ref('users/' + currentUser).set({ online:true });
+
+  listenCalls();
+  document.getElementById('login').style.display = 'none';
+}
+
+function callUser() {
+  document.getElementById('status').innerText = "Calling " + targetUser;
+
+  createPeer(true);
+
+  peer.on('signal', data => {
+    db.ref('calls/' + targetUser).set({ from: currentUser, signal:data });
+  });
+}
+
+function listenCalls() {
+  db.ref('calls/' + currentUser).on('value', snapshot => {
+    const call = snapshot.val();
+    if (!call) return;
+
+    const accept = confirm(call.from + " is calling you");
+    if (!accept) return;
+
+    createPeer(false);
+    peer.signal(call.signal);
+
+    peer.on('signal', data => {
+      db.ref('answers/' + call.from).set(data);
+    });
+  });
+
+  db.ref('answers/' + currentUser).on('value', snapshot => {
+    const data = snapshot.val();
+    if (data && peer) {
+      peer.signal(data);
+    }
+  });
+}
+
+async function getIceServers() {
+  const res = await fetch("YOUR_FUNCTION_URL");
+  const data = await res.json();
+
+  return [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: data.uris,
+      username: data.username,
+      credential: data.password
+    }
+  ];
+}
+
+async function createPeer(initiator) {
+  const iceServers = await getIceServers();
+
+  peer = new SimplePeer({
+    initiator,
+    trickle:false,
+    stream:localStream,
+    config:{ iceServers }
+  });
+
+  peer.on('stream', stream => {
+    document.getElementById('remoteVideo').srcObject = stream;
+    document.getElementById('status').innerText = "Connected";
+  });
+}
+
+function toggleMute() {
+  micOn = !micOn;
+  localStream.getAudioTracks()[0].enabled = micOn;
+}
+
+function endCall() {
+  if (peer) peer.destroy();
+  document.getElementById('remoteVideo').srcObject = null;
+  document.getElementById('status').innerText = "Call Ended";
+}
+</script></body>
+</html>
